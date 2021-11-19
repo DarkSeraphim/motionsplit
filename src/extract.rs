@@ -3,34 +3,32 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 pub fn extract_mp4(path: impl AsRef<Path>) -> std::io::Result<()> {
-   let magic: [u8; 16] = [
-        // M,    o,    t,    i,    o,    n,    P,    h,   o,    t,    o,    
-        // _,    D,    a,    t,    a
-        0x4D, 0x6F, 0x74, 0x69, 0x6F, 0x6E, 0x50, 0x68,0x6F, 0x74, 0x6F, 
-        0x5F, 0x44, 0x61, 0x74, 0x61];
+    let magic: [u8; 16] = [
+        // M,    o,    t,    i,    o,    n,    P,    h,    o,    t,    o,    _,    D,    a,    t,
+        0x4D, 0x6F, 0x74, 0x69, 0x6F, 0x6E, 0x50, 0x68, 0x6F, 0x74, 0x6F, 0x5F, 0x44, 0x61, 0x74,
+        // a
+        0x61,
+    ];
     let path = path.as_ref();
     if path.is_dir() {
-        for entry in path.read_dir()? {
-            if let Ok(entry) = entry {
-                extract_mp4(entry.path())?;
-            }
+        for entry in (path.read_dir()?).flatten() {
+            extract_mp4(entry.path())?;
         }
         return Ok(());
     }
-   
+
     let mut f = File::open(&path)?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
 
     let idx = (0..buf.len() - magic.len())
-        .filter(|start| {
+        .find(|start| {
             let end = start + magic.len();
-            &buf[*start..end] == magic
-        })
-        .next();
+            buf[*start..end] == magic
+        });
 
     if idx.is_none() {
-        return Ok(());    
+        return Ok(());
     }
     let idx = idx.unwrap();
 

@@ -1,17 +1,23 @@
+#![windows_subsystem = "windows"]
+
 use std::env;
+use std::fmt::Display;
 use std::fs::canonicalize;
 use std::path::PathBuf;
 
-use iced::{button, Align, Button, Column, Element, Row, Settings, Text, Application, executor, Command, Clipboard, Subscription};
+use iced::{
+    button, executor, Align, Application, Button, Clipboard, Column, Command, Element, Row,
+    Settings, Subscription, Text,
+};
 
 mod extract;
 mod extract_task;
 
 fn main() {
-    let path = env::args().skip(1).next();
+    let path = env::args().nth(1);
     match path {
         Some(s) => extract::extract_mp4(s).unwrap(),
-        None => open_ui().unwrap()
+        None => open_ui().unwrap(),
     }
 }
 
@@ -23,17 +29,23 @@ fn open_ui() -> iced::Result {
 
 enum Status {
     Success,
+    Progress(String),
     Working,
     Issue(String),
 }
 
-impl ToString for Status {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Success => String::from("Successfully extracted the motion pictures as mp4s"),
-            Self::Working => String::from("Starting conversion..."),
-            Self::Issue(res) => res.to_string()
-        }
+impl Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Success => "Successfully extracted the motion pictures as mp4s",
+                Self::Working => "Starting conversion...",
+                Self::Issue(res) => res,
+                Self::Progress(res) => res,
+            }
+        )
     }
 }
 
@@ -47,11 +59,12 @@ struct MotionSplit {
     convert_button: button::State,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Message {
+#[derive(Debug, Clone)]
+pub enum Message {
     SelectFile,
     SelectDirectory,
     Convert,
+    Progress { path: String, done: u32, total: u32 },
 }
 
 impl Application for MotionSplit {
@@ -59,7 +72,7 @@ impl Application for MotionSplit {
     type Executor = executor::Default;
     type Flags = ();
 
-    fn new(_flags: ()) -> (Self, Command<Self::Message>){
+    fn new(_flags: ()) -> (Self, Command<Self::Message>) {
         (Self::default(), Command::none())
     }
 
@@ -68,6 +81,22 @@ impl Application for MotionSplit {
     }
 
     fn update(&mut self, message: Message, _clipboard: &mut Clipboard) -> Command<Self::Message> {
+        if let Message::Progress { path, done, total } = message {
+            if done == total {
+                self.converting = false;
+                self.status = Some(Status::Success);
+            } else {
+                let mut path_message = path;
+                if cfg!(windows) {
+                    path_message = path_message.trim_start_matches(r"\\?\").to_string();
+                }
+                self.status = Some(Status::Progress(format!(
+                    "{}: {}/{}",
+                    path_message, done, total
+                )));
+            }
+            return Command::none();
+        }
         if let Message::Convert = message {
             match self.path.as_ref() {
                 Some(_) => {
@@ -75,7 +104,9 @@ impl Application for MotionSplit {
                     self.converting = true;
                 }
                 None => {
-                    self.status = Some(Status::Issue("Please select a file or directory to convert".into()))
+                    self.status = Some(Status::Issue(
+                        "Please select a file or directory to convert".into(),
+                    ))
                 }
             }
             return Command::none();
@@ -87,55 +118,57 @@ impl Application for MotionSplit {
 
         let dialog = native_dialog::FileDialog::default();
         let path = match message {
-            Message::SelectFile => { 
-                match dialog.show_open_single_file() {
-                    Ok(opt) => opt,
-                    Err(e) => {
-                        dbg!(e);
-                        None
-                    }
+            Message::SelectFile => match dialog.show_open_single_file() {
+                Ok(opt) => opt,
+                Err(e) => {
+                    dbg!(e);
+                    None
                 }
             },
-            Message::SelectDirectory => {
-                match dialog.show_open_single_dir() {
-                    Ok(opt) => opt,
-                    Err(e) => {
-                        dbg!(e);
-                        None
-                    }
+            Message::SelectDirectory => match dialog.show_open_single_dir() {
+                Ok(opt) => opt,
+                Err(e) => {
+                    dbg!(e);
+                    None
                 }
             },
             _ => return Command::none(),
         };
 
-        self.path = path.map(|buf| {
-            match canonicalize(buf) {
+        self.path = path
+            .map(|buf| match canonicalize(buf) {
                 Err(e) => {
                     dbg!(e);
                     None
-                },
-                Ok(x) => Some(x)
-            }
-        }).flatten();
+                }
+                Ok(x) => Some(x),
+            })
+            .flatten();
         Command::none()
     }
 
-    fn subscription(&self) -> Subscription<Self::Message> {
+    fn subscription(&self) -> iced::Subscription<Self::Message> {
         if self.converting {
-            Subscription::from_recipe()
+            Subscription::from_recipe(extract_task::ExtractTask::new(
+                self.path.as_ref().unwrap().clone(),
+            ))
         } else {
             Subscription::none()
         }
     }
 
     fn view(&mut self) -> Element<Message> {
-        let mut path_message = self.path.as_ref()
-            .map(|p| p.to_str()).flatten()
+        let mut path_message = self
+            .path
+            .as_ref()
+            .map(|p| p.to_str())
+            .flatten()
             .unwrap_or("None");
-        if cfg!(windows) && path_message.starts_with("\\\\?\\") {
-           path_message = &path_message["\\\\?\\".len()..path_message.len()] 
+        if cfg!(windows) {
+            path_message = path_message.trim_start_matches(r"\\?\");
         }
         Column::new()
+            .width(iced::Length::Fill)
             .padding(20)
             .align_items(Align::Center)
             .push(
@@ -144,20 +177,27 @@ impl Application for MotionSplit {
                     .align_items(Align::Center)
                     .push(
                         Button::new(&mut self.pick_file_button, Text::new("Select file"))
-                            .on_press(Message::SelectFile)
-                            
+                            .on_press(Message::SelectFile),
                     )
                     .push(
-                        Button::new(&mut self.pick_directory_button, Text::new("Select directory"))
-                            .on_press(Message::SelectDirectory)
-                    )
+                        Button::new(
+                            &mut self.pick_directory_button,
+                            Text::new("Select directory"),
+                        )
+                        .on_press(Message::SelectDirectory),
+                    ),
             )
-            .push(Text::new(path_message).size(20)) 
+            .push(Text::new(path_message).size(20))
             .push(
                 Button::new(&mut self.convert_button, Text::new("Convert file(s)"))
-                    .on_press(Message::Convert)
+                    .on_press(Message::Convert),
             )
-            .push(Text::new(self.status.as_ref().map(|s| s.to_string()).unwrap_or("".to_string())))
+            .push(Text::new(
+                self.status
+                    .as_ref()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "".to_string()),
+            ))
             .into()
     }
 }
