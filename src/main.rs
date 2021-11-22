@@ -64,7 +64,7 @@ pub enum Message {
     SelectFile,
     SelectDirectory,
     Convert,
-    Progress { path: String, done: u32, total: u32 },
+    ExtractUpdate(extract_task::Update),
 }
 
 impl Application for MotionSplit {
@@ -81,20 +81,26 @@ impl Application for MotionSplit {
     }
 
     fn update(&mut self, message: Message, _clipboard: &mut Clipboard) -> Command<Self::Message> {
-        if let Message::Progress { path, done, total } = message {
-            if done == total {
-                self.converting = false;
-                self.status = Some(Status::Success);
-            } else {
-                let mut path_message = path;
-                if cfg!(windows) {
-                    path_message = path_message.trim_start_matches(r"\\?\").to_string();
+        if let Message::ExtractUpdate(update) = message {
+            match update {
+                extract_task::Update::Progress { path, done, total } => {
+                    if done == total {
+                        self.converting = false;
+                        self.status = Some(Status::Success);
+                    } else {
+                        let mut path_message = path.to_string_lossy().into_owned();
+                        if cfg!(windows) {
+                            path_message = path_message.trim_start_matches(r"\\?\").to_string();
+                        }
+                        self.status = Some(Status::Progress(format!(
+                            "{}: {}/{}",
+                            path_message, done, total
+                        )));
+                    }
                 }
-                self.status = Some(Status::Progress(format!(
-                    "{}: {}/{}",
-                    path_message, done, total
-                )));
+                extract_task::Update::Error(s) => self.status = Some(Status::Issue(s)),
             }
+
             return Command::none();
         }
         if let Message::Convert = message {

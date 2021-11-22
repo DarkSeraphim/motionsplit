@@ -1,12 +1,22 @@
-use iced_futures::futures;
-use iced_futures::subscription::Recipe;
 use std::collections::{HashSet, VecDeque};
+use std::ffi::OsStr;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::thread::spawn;
+
+use iced_futures::futures;
+use iced_futures::subscription::Recipe;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
-type Update = (PathBuf, u32, u32);
+#[derive(Debug, Clone)]
+pub enum Update {
+    Progress {
+        path: PathBuf,
+        done: u32,
+        total: u32,
+    },
+    Error(String),
+}
 
 pub struct ExtractTask<P> {
     path: P,
@@ -25,6 +35,7 @@ where
             unbounded_channel();
         let pathclone: PathBuf = self.path.as_ref().into();
         spawn(move || {
+            let ext: Option<&OsStr> = Some("jpg".as_ref());
             let mut deque = VecDeque::from([pathclone.clone()]);
             let mut files = Vec::new();
             let mut visited = HashSet::new();
@@ -33,7 +44,9 @@ where
                 if let Some(path) = current_directory {
                     visited.insert(path.clone());
                     if path.is_file() {
-                        files.push(path);
+                        if path.extension() == ext {
+                            files.push(path);
+                        }
                     } else if path.is_dir() {
                         if let Ok(entries) = path.read_dir() {
                             for entry in entries.flatten() {
@@ -51,14 +64,30 @@ where
             }
             let len = files.len() as u32;
             for (idx, path) in files.iter().enumerate() {
-                sender
-                    .send((path.to_owned(), idx as u32, len))
-                    .expect("Failed to send message");
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                let res = match crate::extract::extract_mp4(path) {
+                    Err(e) => {
+                        let res = sender.send(Update::Error(e.to_string()));
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        res
+                    },
+                    _ => sender.send(Update::Progress {
+                        path: path.to_owned(),
+                        done: idx as u32,
+                        total: len,
+                    }),
+                };
+                if res.is_err() {
+                    panic!("Failed to send message");
+                }
             }
-            sender
-                .send((pathclone, len, len))
-                .expect("Failed to send message");
+            let res = sender.send(Update::Progress {
+                path: pathclone,
+                done: len,
+                total: len,
+            });
+            if res.is_err() {
+                panic!("Failed to send message");
+            }
         });
         receiver
     }
@@ -82,12 +111,9 @@ where
         let mut receiver = self.start_task();
 
         Box::pin(futures::stream::poll_fn(move |context| {
-            receiver.poll_recv(context).map(|opt| {
-                opt.map(|(path, done, total)| {
-                    let path = path.to_string_lossy().into_owned();
-                    crate::Message::Progress { path, done, total }
-                })
-            })
+            receiver
+                .poll_recv(context)
+                .map(|opt| opt.map(crate::Message::ExtractUpdate))
         }))
     }
 }

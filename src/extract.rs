@@ -21,11 +21,10 @@ pub fn extract_mp4(path: impl AsRef<Path>) -> std::io::Result<()> {
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
 
-    let idx = (0..buf.len() - magic.len())
-        .find(|start| {
-            let end = start + magic.len();
-            buf[*start..end] == magic
-        });
+    let idx = (0..buf.len() - magic.len()).find(|start| {
+        let end = start + magic.len();
+        buf[*start..end] == magic
+    });
 
     if idx.is_none() {
         return Ok(());
