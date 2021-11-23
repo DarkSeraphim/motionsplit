@@ -6,7 +6,7 @@ use std::fs::canonicalize;
 use std::path::PathBuf;
 
 use iced::{
-    button, executor, Align, Application, Button, Clipboard, Column, Command, Element, Row,
+    button, executor, Align, Application, Button, Clipboard, Column, Command, Element, Length, Row, Rule,
     Settings, Subscription, Text,
 };
 
@@ -174,36 +174,50 @@ impl Application for MotionSplit {
             path_message = path_message.trim_start_matches(r"\\?\");
         }
         Column::new()
-            .width(iced::Length::Fill)
-            .padding(20)
-            .align_items(Align::Center)
             .push(
-                Row::new()
-                    .spacing(20)
+                Column::new()
+                    .width(iced::Length::Fill)
+                    .height(iced::Length::Fill)
+                    .padding(20)
                     .align_items(Align::Center)
                     .push(
-                        Button::new(&mut self.pick_file_button, Text::new("Select file"))
-                            .on_press(Message::SelectFile),
+                        Row::new()
+                            .spacing(20)
+                            .align_items(Align::Center)
+                            .push(
+                                Button::new(&mut self.pick_file_button, Text::new("Select file"))
+                                    .on_press(Message::SelectFile),
+                            )
+                            .push(
+                                Button::new(
+                                    &mut self.pick_directory_button,
+                                    Text::new("Select directory"),
+                                )
+                                .on_press(Message::SelectDirectory),
+                            ),
                     )
+                    .push(Text::new(path_message).size(20))
                     .push(
-                        Button::new(
-                            &mut self.pick_directory_button,
-                            Text::new("Select directory"),
-                        )
-                        .on_press(Message::SelectDirectory),
-                    ),
+                        Button::new(&mut self.convert_button, Text::new("Convert file(s)"))
+                            .on_press(Message::Convert),
+                    )
             )
-            .push(Text::new(path_message).size(20))
             .push(
-                Button::new(&mut self.convert_button, Text::new("Convert file(s)"))
-                    .on_press(Message::Convert),
+                Column::new()
+                    .align_items(Align::Center)
+                    .push(Rule::horizontal(0))
+                    .push(Row::new()
+                        .padding(10)
+                        .align_items(Align::Start)
+                        .push(Text::new("Status: "))
+                        .push(Text::new(
+                            Some("Hello World")
+                                .as_ref()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "".to_string())
+                        ).width(Length::Fill))
+                    )
             )
-            .push(Text::new(
-                self.status
-                    .as_ref()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "".to_string()),
-            ))
             .into()
     }
 }
