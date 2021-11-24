@@ -11,7 +11,7 @@ use iced::{
 };
 
 mod extract;
-mod extract_task;
+mod file_task;
 
 fn main() {
     let path = env::args().nth(1);
@@ -65,7 +65,7 @@ pub enum Message {
     SelectFile,
     SelectDirectory,
     Convert,
-    ExtractUpdate(extract_task::Update),
+    TaskUpdate(file_task::Update),
     Noop,
 }
 
@@ -83,9 +83,9 @@ impl Application for MotionSplit {
     }
 
     fn update(&mut self, message: Message, _clipboard: &mut Clipboard) -> Command<Self::Message> {
-        if let Message::ExtractUpdate(update) = message {
+        if let Message::TaskUpdate(update) = message {
             match update {
-                extract_task::Update::Progress { path, done, total } => {
+                file_task::Update::Progress { path, done, total } => {
                     if done == total {
                         self.converting = false;
                         self.status = Some(Status::Success);
@@ -100,7 +100,7 @@ impl Application for MotionSplit {
                         )));
                     }
                 }
-                extract_task::Update::Error(s) => self.status = Some(Status::Issue(s)),
+                file_task::Update::Error(s) => self.status = Some(Status::Issue(s)),
             }
 
             return Command::none();
@@ -157,7 +157,7 @@ impl Application for MotionSplit {
 
     fn subscription(&self) -> iced::Subscription<Self::Message> {
         if self.converting {
-            Subscription::from_recipe(extract_task::ExtractTask::new(
+            Subscription::from_recipe(file_task::FileTask::new(
                 self.path.as_ref().unwrap().clone(),
             ))
         } else {

@@ -18,11 +18,11 @@ pub enum Update {
     Error(String),
 }
 
-pub struct ExtractTask<P> {
+pub struct FileTask<P> {
     path: P,
 }
 
-impl<P> ExtractTask<P>
+impl<P> FileTask<P>
 where
     P: AsRef<Path> + Send,
 {
@@ -93,7 +93,7 @@ where
     }
 }
 
-impl<H, I, P> Recipe<H, I> for ExtractTask<P>
+impl<H, I, P> Recipe<H, I> for FileTask<P>
 where
     H: Hasher,
     P: AsRef<Path> + Hash + Send + 'static,
@@ -113,7 +113,7 @@ where
         Box::pin(futures::stream::poll_fn(move |context| {
             receiver
                 .poll_recv(context)
-                .map(|opt| opt.map(crate::Message::ExtractUpdate))
+                .map(|opt| opt.map(crate::Message::TaskUpdate))
         }))
     }
 }
