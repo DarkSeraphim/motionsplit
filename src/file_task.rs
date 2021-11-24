@@ -18,22 +18,29 @@ pub enum Update {
     Error(String),
 }
 
-pub struct FileTask<P> {
+pub struct FileTask<P, U> {
     path: P,
+    output: U,
+    filter_duplicates: bool,
+    rename_files: bool,
 }
 
-impl<P> FileTask<P>
+impl<P, U> FileTask<P, U>
 where
     P: AsRef<Path> + Send,
+    U: AsRef<Path> + Send,
 {
-    pub fn new(path: P) -> Self {
-        Self { path }
+    pub fn new(path: P, output: U, filter_duplicates: bool, rename_files: bool) -> Self {
+        Self { path, output, filter_duplicates, rename_files }
     }
 
     fn start_task(&mut self) -> UnboundedReceiver<Update> {
         let (sender, receiver): (UnboundedSender<Update>, UnboundedReceiver<Update>) =
             unbounded_channel();
         let pathclone: PathBuf = self.path.as_ref().into();
+        let outclone: PathBuf = self.output.as_ref().into();
+        let rename_files = self.rename_files;
+        let filter_duplicates = self.filter_duplicates;
         spawn(move || {
             let ext: Option<&OsStr> = Some("jpg".as_ref());
             let mut deque = VecDeque::from([pathclone.clone()]);
@@ -63,8 +70,25 @@ where
                 }
             }
             let len = files.len() as u32;
+            let mut seen_files: HashSet<&[u8]> = HashSet::new();
+
             for (idx, path) in files.iter().enumerate() {
-                let res = match crate::extract::extract_mp4(path) {
+                // TODO: compute hash
+                let hash: &[u8] = &[0];
+                let res = if filter_duplicates && !seen_files.insert(hash) {
+                    Ok(())
+                } else {
+                    let relative = path.strip_prefix(&pathclone).unwrap();
+                    let mut newpath = outclone.join(relative); 
+                    if rename_files {
+                        let filename = newpath.file_name().unwrap().to_owned();
+                        // TODO: overwrite filename
+                        newpath.set_file_name(filename);
+                    }
+                    crate::extract::extract_mp4(path)
+                };
+
+                let res = match res {
                     Err(e) => {
                         let res = sender.send(Update::Error(e.to_string()));
                         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -93,15 +117,19 @@ where
     }
 }
 
-impl<H, I, P> Recipe<H, I> for FileTask<P>
+impl<H, I, P, U> Recipe<H, I> for FileTask<P, U>
 where
     H: Hasher,
     P: AsRef<Path> + Hash + Send + 'static,
+    U: AsRef<Path> + Hash + Send + 'static,
 {
     type Output = crate::Message;
 
     fn hash(&self, state: &mut H) {
         self.path.hash(state);
+        self.output.hash(state);
+        self.filter_duplicates.hash(state);
+        self.rename_files.hash(state);
     }
 
     fn stream(
