@@ -11,7 +11,7 @@ pub fn extract_mp4(path: impl AsRef<Path>) -> std::io::Result<()> {
         return Ok(());
     }
 
-    let buf = read(&path)?; 
+    let buf = read(&path)?;
     let idx = (0..buf.len() - magic.len()).find(|start| {
         let end = start + magic.len();
         &buf[*start..end] == magic
